@@ -1,0 +1,16 @@
+@startuml
+participant "Cloud Hub pod" as ch
+participant Vault as vault
+
+create ch
+kubernetes -> ch : create
+vault -> ch : inject agent
+ch -> ch : inject bearer token
+
+note right 
+the bearer token must 
+be used in all 
+subsequent requests in the 
+HTTP authorization header
+end note
+@enduml

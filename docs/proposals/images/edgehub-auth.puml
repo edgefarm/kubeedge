@@ -1,0 +1,15 @@
+@startuml
+participant "Edge Hub" as eh
+participant Vault as vault
+
+eh -> vault : send login request 
+note right: using the bootstrap certificate
+vault -> vault : check certificate validity
+return bearer token
+note right 
+the bearer token must 
+be used in all 
+subsequent requests in the 
+HTTP authorization header
+end note
+@enduml
