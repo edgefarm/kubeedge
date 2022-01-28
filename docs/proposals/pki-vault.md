@@ -74,7 +74,7 @@ Additionally vault is a cloud friendly application that may be operated highly a
 
 The following diagram shows the high level overview of the system:
 
- ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/docs/images/proposals/pki-system-components.puml)
+ ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/vault/docs/images/proposals/pki-system-components.puml)
 
  Within the cloud environment an instance of vault is made available. 
  
@@ -126,7 +126,7 @@ When a client connects to the cloud hub http server, the provided client certifi
 * Serial number of the offered client certificate has not been revoked
 * The passed certificate is signed by a valid certificate chain
 
- ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/kubeedge/docs/images/proposals/pki-cloudhub-clientvalidation.puml)
+ ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/vault/docs/images/proposals/pki-cloudhub-clientvalidation.puml)
 
 The validation of the client interface must be done programmatically on establishing the connection and is done by the client libraries. Vault does not provide functionality for _validating a certificate chain_.
 
@@ -141,14 +141,14 @@ These are detailed use cases for the edge hub
 
 ### Authenticate to Vault
 
-The initial step for the cloud hub nodes is to establish their identity with Vault. For this, every edge node must be configured with a _bootstrap certificate_. This certificate
+The initial step for the edge hub nodes is to establish their identity with Vault. For this, every edge node must be configured with a _bootstrap certificate_. This certificate
 
 * is only used for authentication to Vault, not for communicating with the cloud hub. This might be enforced by signing these certificates with another CA certificate than the CA certificate used for communication.
 * Is long lived to avoid the requirement for frequent renewal. However, the bootstrap certificate _should_ be renewed periodically. These periods should be aligned with the physical maintenance intervals of the edge devices.
 * Must be protected tamper proof within the device.
 
 The authentication is straight forward:
- ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/kubeedge/docs/images/proposals/pki-cloudhub-edgehub.puml)
+ ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/vault/docs/images/proposals/pki-edgehub-auth.puml)
 
 ### Renew the token
 
