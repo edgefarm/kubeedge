@@ -74,7 +74,7 @@ Additionally vault is a cloud friendly application that may be operated highly a
 
 The following diagram shows the high level overview of the system:
 
- ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/vault/docs/proposals/images/system-components.puml)
+ ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/docs/images/proposals/pki-system-components.puml)
 
  Within the cloud environment an instance of vault is made available. 
  
@@ -126,7 +126,7 @@ When a client connects to the cloud hub http server, the provided client certifi
 * Serial number of the offered client certificate has not been revoked
 * The passed certificate is signed by a valid certificate chain
 
- ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/vault/docs/proposals/images/cloudhub-clientvalidation.puml)
+ ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/kubeedge/docs/images/proposals/pki-cloudhub-clientvalidation.puml)
 
 The validation of the client interface must be done programmatically on establishing the connection and is done by the client libraries. Vault does not provide functionality for _validating a certificate chain_.
 
@@ -148,7 +148,7 @@ The initial step for the cloud hub nodes is to establish their identity with Vau
 * Must be protected tamper proof within the device.
 
 The authentication is straight forward:
- ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/vault/docs/proposals/images/cloudhub-edgehub.puml)
+ ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/kubeedge/docs/images/proposals/pki-cloudhub-edgehub.puml)
 
 ### Renew the token
 
