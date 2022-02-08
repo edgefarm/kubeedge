@@ -242,7 +242,7 @@ type EdgeHub struct {
 	// Enable indicates whether EdgeHub is enabled,
 	// if set to false (for debugging etc.), skip checking other EdgeHub configs.
 	// default true
-	Enable bool `json:"enable"`
+	Enable bool `json:"enable,omitempty"`
 	// Heartbeat indicates heart beat (second)
 	// default 15
 	Heartbeat int32 `json:"heartbeat,omitempty"`
@@ -265,12 +265,15 @@ type EdgeHub struct {
 	// Optional if quic is configured
 	WebSocket *EdgeHubWebSocket `json:"websocket,omitempty"`
 	// Token indicates the priority of joining the cluster for the edge
-	Token string `json:"token"`
+	Token string `json:"token,omitempty"`
 	// HTTPServer indicates the server for edge to apply for the certificate.
 	HTTPServer string `json:"httpServer,omitempty"`
 	// RotateCertificates indicates whether edge certificate can be rotated
 	// default true
 	RotateCertificates bool `json:"rotateCertificates,omitempty"`
+	// Use external certificate retrieval
+	// default false
+	ExternalCertificateRetrieval bool `json:"extCertificateRetrieval,omitempty"`
 }
 
 // EdgeHubQUIC indicates the quic client config

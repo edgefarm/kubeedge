@@ -50,13 +50,10 @@ type CertManager struct {
 	certFile string
 	keyFile  string
 
-	token string
 	// Set to time.Now but can be stubbed out for testing
 	now func() time.Time
 
-	caURL   string
-	certURL string
-	Done    chan struct{}
+	Done chan struct{}
 
 	certificateRetriever CertificateRetriever
 }
@@ -93,7 +90,7 @@ func (cecr *CloudEdgeCertRetriever) RetrieveCertificate() (err error) {
 	if len(tokenParts) != 4 {
 		return fmt.Errorf("token credentials are in the wrong format")
 	}
-	ok, hash, newHash := ValidateCACerts(cacert, tokenParts[0])
+	ok, hash, newHash := cecr.validateCACerts(cacert, tokenParts[0])
 	if !ok {
 		return fmt.Errorf("failed to validate CA certificate. tokenCAhash: %s, CAhash: %s", hash, newHash)
 	}
@@ -135,19 +132,16 @@ func NewCertManager(edgehub v1alpha1.EdgeHub, nodename string) CertManager {
 			CommonName:   "kubeedge.io",
 		},
 	}
-	return CertManager{
-		RotateCertificates: edgehub.RotateCertificates,
-		NodeName:           nodename,
-		token:              edgehub.Token,
-		CR:                 certReq,
-		caFile:             edgehub.TLSCAFile,
-		certFile:           edgehub.TLSCertFile,
-		keyFile:            edgehub.TLSPrivateKeyFile,
-		now:                time.Now,
-		caURL:              edgehub.HTTPServer + constants.DefaultCAURL,
-		certURL:            edgehub.HTTPServer + constants.DefaultCertURL,
-		Done:               make(chan struct{}),
-		certificateRetriever: &CloudEdgeCertRetriever{
+	var certRetriever CertificateRetriever
+	if edgehub.ExternalCertificateRetrieval {
+		certRetriever = &ExternalCertificateRetriever{
+			caFile:   edgehub.TLSCAFile,
+			certFile: edgehub.TLSCertFile,
+			keyFile:  edgehub.TLSPrivateKeyFile,
+			now:      time.Now,
+		}
+	} else {
+		certRetriever = &CloudEdgeCertRetriever{
 			caFile:   edgehub.TLSCAFile,
 			certFile: edgehub.TLSCertFile,
 			keyFile:  edgehub.TLSPrivateKeyFile,
@@ -156,15 +150,92 @@ func NewCertManager(edgehub v1alpha1.EdgeHub, nodename string) CertManager {
 			certURL:  edgehub.HTTPServer + constants.DefaultCertURL,
 			token:    edgehub.Token,
 			CR:       certReq,
-		},
+		}
 	}
+	return CertManager{
+		RotateCertificates:   edgehub.RotateCertificates,
+		NodeName:             nodename,
+		caFile:               edgehub.TLSCAFile,
+		certFile:             edgehub.TLSCertFile,
+		keyFile:              edgehub.TLSPrivateKeyFile,
+		now:                  time.Now,
+		Done:                 make(chan struct{}),
+		certificateRetriever: certRetriever,
+	}
+}
+
+// ExternalCertificateRetriever is a CertificateRetriever that relies on an external
+// entity to retrieve the certificates just validates the certificate
+type ExternalCertificateRetriever struct {
+	caFile   string
+	certFile string
+	keyFile  string
+	now      func() time.Time
+}
+
+// RetrieveCertificate reads in the current certificates and validates them. If the certificates are
+// outdated, an error is returned. Note, that this method does not actually retrieve the
+// certificates, but only asserts their existence.
+func (ecr *ExternalCertificateRetriever) RetrieveCertificate() error {
+	caCert, err := readCertificate(ecr.caFile)
+	if err != nil {
+		return fmt.Errorf("failed to read ca certificate: %v", err)
+	}
+	if !caCert.IsCA {
+		return fmt.Errorf("certificate %s is not a CA certificate", ecr.caFile)
+	}
+
+	// define the certificate pool for validation:
+	// the certificate itself, iff it is self-signed (determined via the serial number)
+	// or the system pool
+	var certPool *x509.CertPool
+	if caCert.SerialNumber.String() == caCert.Issuer.SerialNumber || caCert.Issuer.SerialNumber == "" {
+		certPool = x509.NewCertPool()
+		certPool.AddCert(caCert)
+	} else {
+		certPool, err = x509.SystemCertPool()
+		if err != nil {
+			return fmt.Errorf("failed to retrieve system cert pool: %v", err)
+		}
+	}
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(caCert)
+	_, err = caCert.Verify(x509.VerifyOptions{
+		CurrentTime: ecr.now(),
+		Roots:       caPool,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to validate CA certificate: %v", err)
+	}
+
+	cert, err := readCertificate(ecr.certFile)
+	if err != nil {
+		return fmt.Errorf("failed to read client certificate: %v", err)
+	}
+
+	_, err = cert.Verify(x509.VerifyOptions{
+		CurrentTime: ecr.now(),
+		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		Roots:       certPool,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to validate client certificate: %v", err)
+	}
+
+	_, err = readKey(ecr.keyFile)
+	if err != nil {
+		return fmt.Errorf("failed to read private key file: %v", err)
+	}
+
+	return nil
 }
 
 // Start starts the CertManager
 func (cm *CertManager) Start() {
 	_, err := cm.getCurrent()
 	if err != nil {
-		err = cm.applyCerts()
+		err = cm.certificateRetriever.RetrieveCertificate()
 		if err != nil {
 			klog.Exitf("Error: %v", err)
 		}
@@ -189,7 +260,7 @@ func (cm *CertManager) getCurrent() (*tls.Certificate, error) {
 		return nil, fmt.Errorf("failed to read ca file: %v", err)
 	}
 	caPool := x509.NewCertPool()
-	caCer, err := cm.getCACertificate()
+	caCer, err := readCertificate(cm.caFile)
 	if err != nil {
 		return nil, err
 	}
@@ -202,11 +273,6 @@ func (cm *CertManager) getCurrent() (*tls.Certificate, error) {
 		return nil, fmt.Errorf("failed to validate certificates: %v", err)
 	}
 	return &cert, nil
-}
-
-// applyCerts realizes the certificate application by token
-func (cm *CertManager) applyCerts() error {
-	return cm.certificateRetriever.RetrieveCertificate()
 }
 
 // rotate starts edge certificate rotation process
@@ -266,27 +332,9 @@ func (cm *CertManager) rotateCert() (bool, error) {
 	return true, nil
 }
 
-// getCA returns the CA in pem format.
-func (cm *CertManager) getCA() ([]byte, error) {
-	return ioutil.ReadFile(cm.caFile)
-}
-
-func (cm *CertManager) getCACertificate() (*x509.Certificate, error) {
-	caPEM, err := cm.getCA()
-	if err != nil {
-		return nil, err
-	}
-	caDER, _ := pem.Decode(caPEM)
-
-	cert, err := x509.ParseCertificate(caDER.Bytes)
-	if err != nil {
-		return nil, err
-	}
-	return cert, err
-}
-
-func (cm *CertManager) getCertificate() (*x509.Certificate, error) {
-	certPEM, err := ioutil.ReadFile(cm.certFile)
+// readCertificate reads a PEM encoded file an returns a
+func readCertificate(filename string) (*x509.Certificate, error) {
+	certPEM, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -298,8 +346,10 @@ func (cm *CertManager) getCertificate() (*x509.Certificate, error) {
 	return cert, nil
 }
 
-func (cm *CertManager) getKey() (crypto.Signer, error) {
-	keyPEM, err := ioutil.ReadFile(cm.keyFile)
+// readKey reads a PEM encoded private key and decodes it.
+// elliptic curve resp. PKCS#1 keys are handled automatically
+func readKey(filename string) (crypto.Signer, error) {
+	keyPEM, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -384,16 +434,16 @@ func (cecr *CloudEdgeCertRetriever) getCSR() (*ecdsa.PrivateKey, []byte, error) 
 }
 
 // ValidateCACerts validates the CA certificate by hash code
-func ValidateCACerts(cacerts []byte, hash string) (bool, string, string) {
+func (cecr *CloudEdgeCertRetriever) validateCACerts(cacerts []byte, hash string) (bool, string, string) {
 	if len(cacerts) == 0 && hash == "" {
 		return true, "", ""
 	}
 
-	newHash := hashCA(cacerts)
+	newHash := cecr.hashCA(cacerts)
 	return hash == newHash, hash, newHash
 }
 
-func hashCA(cacerts []byte) string {
+func (cecr *CloudEdgeCertRetriever) hashCA(cacerts []byte) string {
 	digest := sha256.Sum256(cacerts)
 	return hex.EncodeToString(digest[:])
 }
