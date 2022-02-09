@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"encoding/json"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -271,9 +272,61 @@ type EdgeHub struct {
 	// RotateCertificates indicates whether edge certificate can be rotated
 	// default true
 	RotateCertificates bool `json:"rotateCertificates,omitempty"`
-	// Use external certificate retrieval
+
+	// Configuration for using an external Vault server for certificate generation
+	Vault EdgeHubVault `json:"vault,omitempty"`
+}
+
+type EdgeHubVault struct {
+	// Enable vault integration
 	// default false
-	ExternalCertificateRetrieval bool `json:"extCertificateRetrieval,omitempty"`
+	Enable bool `json:"enable,omitempty"`
+	
+	// The tokenfile for hashicorp vault. This has to be generated externally and
+	// authenticates the edge node to vault
+	TokenFile              string        `json:"tokenFile,omitempty"`
+
+	// The role to use when requesting a new certificate. The role defines
+	// certificate parameters, e.g. max TTL etc.
+	Role                   string        `json:"role,omitempty"`
+	// The X.509 common name to use when requesting the certificate. The vault server
+	// may impose restrictions, which legal names may be used.
+	CommonName             string        `json:"commonName,omitempty"`
+
+	// The address of the vault server
+	Vault                  string        `json:"vault,omitempty"`
+
+	// The TTL for the requested certificate. The vault server may impose
+	// restrictions on the maximum TTL.
+	TTL                    time.Duration `json:"ttl,omitempty"`
+}
+
+func (ehv *EdgeHubVault) UnmarshalJSON(data []byte) error {
+	// use an intermediate structure for unmarshalling
+	// as described here: https://penkovski.com/post/go-unmarshal-custom-types/
+	tmp := struct {
+		Enable bool `json:"enable,omitempty"`
+		// The tokenfile for hashicorp vault
+		TokenFile  string `json:"tokenFile,omitempty"`
+		Role       string `json:"role,omitempty"`
+		CommonName string `json:"commonName,omitempty"`
+		TTL        string `json:"ttl,omitempty"`
+		Vault      string `json:"vault,omitempty"`
+	}{}
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	ehv.CommonName = tmp.CommonName
+	ehv.Enable = tmp.Enable
+	ehv.Role = tmp.Role
+	ehv.Vault = tmp.Vault
+	ttl, err := time.ParseDuration(tmp.TTL)
+	if err != nil {
+		return err
+	}
+	ehv.TTL = ttl
+	ehv.TokenFile = tmp.TokenFile
+	return nil
 }
 
 // EdgeHubQUIC indicates the quic client config

@@ -13,6 +13,7 @@ require (
 	github.com/coreos/go-systemd v0.0.0-20190620071333-e64a0ec8b42a // indirect
 	github.com/docker/docker v20.10.2+incompatible
 	github.com/eclipse/paho.mqtt.golang v1.2.0
+	github.com/edgefarm/vault-integration v0.0.0-20220209150523-94707fa43665
 	github.com/emicklei/go-restful v2.9.6+incompatible
 	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible

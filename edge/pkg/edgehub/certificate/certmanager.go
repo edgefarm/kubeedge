@@ -133,12 +133,13 @@ func NewCertManager(edgehub v1alpha1.EdgeHub, nodename string) CertManager {
 		},
 	}
 	var certRetriever CertificateRetriever
-	if edgehub.ExternalCertificateRetrieval {
-		certRetriever = &ExternalCertificateRetriever{
-			caFile:   edgehub.TLSCAFile,
-			certFile: edgehub.TLSCertFile,
-			keyFile:  edgehub.TLSPrivateKeyFile,
-			now:      time.Now,
+	if edgehub.Vault.Enable {
+		var err error
+		certRetriever, err = NewVaultRetriever(edgehub)
+		if err != nil {
+			// it is a fatal error, when the certificate retriever should be used,
+			// but cannot be created due to a misconfiguration. Bailing...
+			klog.Exitf("Failed to create cert retriever: %v", err)
 		}
 	} else {
 		certRetriever = &CloudEdgeCertRetriever{
@@ -162,73 +163,6 @@ func NewCertManager(edgehub v1alpha1.EdgeHub, nodename string) CertManager {
 		Done:                 make(chan struct{}),
 		certificateRetriever: certRetriever,
 	}
-}
-
-// ExternalCertificateRetriever is a CertificateRetriever that relies on an external
-// entity to retrieve the certificates just validates the certificate
-type ExternalCertificateRetriever struct {
-	caFile   string
-	certFile string
-	keyFile  string
-	now      func() time.Time
-}
-
-// RetrieveCertificate reads in the current certificates and validates them. If the certificates are
-// outdated, an error is returned. Note, that this method does not actually retrieve the
-// certificates, but only asserts their existence.
-func (ecr *ExternalCertificateRetriever) RetrieveCertificate() error {
-	caCert, err := readCertificate(ecr.caFile)
-	if err != nil {
-		return fmt.Errorf("failed to read ca certificate: %v", err)
-	}
-	if !caCert.IsCA {
-		return fmt.Errorf("certificate %s is not a CA certificate", ecr.caFile)
-	}
-
-	// define the certificate pool for validation:
-	// the certificate itself, iff it is self-signed (determined via the serial number)
-	// or the system pool
-	var certPool *x509.CertPool
-	if caCert.SerialNumber.String() == caCert.Issuer.SerialNumber || caCert.Issuer.SerialNumber == "" {
-		certPool = x509.NewCertPool()
-		certPool.AddCert(caCert)
-	} else {
-		certPool, err = x509.SystemCertPool()
-		if err != nil {
-			return fmt.Errorf("failed to retrieve system cert pool: %v", err)
-		}
-	}
-
-	caPool := x509.NewCertPool()
-	caPool.AddCert(caCert)
-	_, err = caCert.Verify(x509.VerifyOptions{
-		CurrentTime: ecr.now(),
-		Roots:       caPool,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to validate CA certificate: %v", err)
-	}
-
-	cert, err := readCertificate(ecr.certFile)
-	if err != nil {
-		return fmt.Errorf("failed to read client certificate: %v", err)
-	}
-
-	_, err = cert.Verify(x509.VerifyOptions{
-		CurrentTime: ecr.now(),
-		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		Roots:       certPool,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to validate client certificate: %v", err)
-	}
-
-	_, err = readKey(ecr.keyFile)
-	if err != nil {
-		return fmt.Errorf("failed to read private key file: %v", err)
-	}
-
-	return nil
 }
 
 // Start starts the CertManager
