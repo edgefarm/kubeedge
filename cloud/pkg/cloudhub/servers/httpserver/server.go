@@ -219,9 +219,15 @@ func signCerts(subInfo pkix.Name, pbKey crypto.PublicKey, usages []x509.ExtKeyUs
 	}
 
 	caKeyDER := hubconfig.Config.CaKey
-	caKey, err := x509.ParseECPrivateKey(caKeyDER)
+	var caKey crypto.Signer
+	caKey, err = x509.ParseECPrivateKey(caKeyDER)
 	if err != nil {
-		return nil, fmt.Errorf("unable to ParseECPrivateKey: %v", err)
+		// Attempt pkcs#1 decode as fallback
+		klog.Info("Could not parse elliptic curve private key, attempting PKCS#1: %v", err)
+		caKey, err = x509.ParsePKCS1PrivateKey(caKeyDER)
+		if err != nil {
+			return nil, fmt.Errorf("unable to ParseECPrivateKey: %v", err)
+		}
 	}
 
 	edgeCertSigningDuration := hubconfig.Config.CloudHub.EdgeCertSigningDuration
@@ -253,8 +259,8 @@ func CheckCertExistsFromSecret() bool {
 // and then check whether certificates exist in the secret, generate if they don't exist
 func PrepareAllCerts() error {
 	// Check whether the ca exists in the local directory
-	if hubconfig.Config.Ca == nil && hubconfig.Config.CaKey == nil {
-		klog.Info("Ca and CaKey don't exist in local directory, and will read from the secret")
+	if hubconfig.Config.Ca == nil {
+		klog.Info("Ca doesn't exist in local directory, and will be read from the secret")
 		// Check whether the ca exists in the secret
 		secretHasCA := CheckCaExistsFromSecret()
 		if !secretHasCA {

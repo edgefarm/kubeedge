@@ -29,7 +29,7 @@ func StartCloudHub(messageq *channelq.ChannelMessageQueue) {
 	}
 }
 
-func createTLSConfig(ca, cert, key []byte) tls.Config {
+func createTLSConfig(ca []byte, cert, key string) tls.Config {
 	// init certificate
 	pool := x509.NewCertPool()
 	ok := pool.AppendCertsFromPEM(pem.EncodeToMemory(&pem.Block{Type: certutil.CertificateBlockType, Bytes: ca}))
@@ -37,22 +37,25 @@ func createTLSConfig(ca, cert, key []byte) tls.Config {
 		panic(fmt.Errorf("fail to load ca content"))
 	}
 
-	certificate, err := tls.X509KeyPair(pem.EncodeToMemory(&pem.Block{Type: certutil.CertificateBlockType, Bytes: cert}), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}))
-	if err != nil {
-		panic(err)
-	}
 	return tls.Config{
-		ClientCAs:    pool,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		Certificates: []tls.Certificate{certificate},
-		MinVersion:   tls.VersionTLS12,
+		ClientCAs:  pool,
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			// dynamically read the certificate
+			certificate, err := tls.LoadX509KeyPair(cert, key)
+			if err != nil {
+				panic(err)
+			}
+			return &certificate, nil
+		},
+		MinVersion: tls.VersionTLS12,
 		// has to match cipher used by NewPrivateKey method, currently is ECDSA
 		CipherSuites: []uint16{tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256},
 	}
 }
 
 func startWebsocketServer() {
-	tlsConfig := createTLSConfig(hubconfig.Config.Ca, hubconfig.Config.Cert, hubconfig.Config.Key)
+	tlsConfig := createTLSConfig(hubconfig.Config.Ca, hubconfig.Config.TLSCertFile, hubconfig.Config.TLSPrivateKeyFile)
 	svc := server.Server{
 		Type:       api.ProtocolTypeWS,
 		TLSConfig:  &tlsConfig,
@@ -66,7 +69,7 @@ func startWebsocketServer() {
 }
 
 func startQuicServer() {
-	tlsConfig := createTLSConfig(hubconfig.Config.Ca, hubconfig.Config.Cert, hubconfig.Config.Key)
+	tlsConfig := createTLSConfig(hubconfig.Config.Ca, hubconfig.Config.TLSCertFile, hubconfig.Config.TLSPrivateKeyFile)
 	svc := server.Server{
 		Type:       api.ProtocolTypeQuic,
 		TLSConfig:  &tlsConfig,
