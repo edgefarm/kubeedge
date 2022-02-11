@@ -1,0 +1,50 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+bases:
+  - ../../cloud
+
+resources:
+  - ca-configmap.yaml
+  
+patches:
+  - patch.yaml
+
+configMapGenerator:
+  - name: certretrieval.config
+    namespace: kubeedge
+    files:
+      - certretrieval.config
+
+patchesJson6902:
+  - path: patch-volumes.json
+    target:
+      kind: Deployment
+      name: cloudcore
+      version: v1
+      group: apps
+      namespace: kubeedge
+
+      # volumes:
+      # - configMap:
+      #     items:
+      #     - key: ca.crt
+      #       path: ca.crt
+      #     name: cacert
+      #   name: cacert
+      # - configMap:
+      #     items:
+      #     - key: certretrieval.config
+      #       path: certretrieval.config
+      #     name: certretrieval.config-tthd4kfd8m
+      #   name: settings
+      # - configMap:
+      #     name: cloudcore
+      #   name: conf
+      # - hostPath:
+      #     path: /etc/kubeedge
+      #     type: DirectoryOrCreate
+      #   name: certs
+      # - hostPath:
+      #     path: /var/lib/kubeedge
+      #     type: DirectoryOrCreate
+      #   name: sock
