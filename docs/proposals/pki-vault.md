@@ -2,7 +2,16 @@ title: Support for external PKI for authentication of edge nodes
 
 # Motivation
 
-**TBD. synchronize with https://github.com/kubeedge/kubeedge/issues/3100**
+The current implementation of KubeEdge performs tasks of a Certification Authority,
+i.e. cryptographic certificates are created and validated. Additionally, only partial
+support for certificate rotation on the edge node side and no support for certificate
+rotation on the cloud hub side is provided. By integrating 
+[Hashicorp Vault](https://www.vaultproject.io/) and offloading the heavy lifting
+of certificate handling to it, the framework could be more robust, on point and 
+more easily to maintain. 
+This proposal describes an approach for the integration of Vault with some moderate
+changes to the implementation. A pull request is currently prepared, that implements
+these changes and may be used to demonstrate the viability of the integration approach.
 
 # Driving Forces
 
@@ -91,7 +100,7 @@ Vault will perform the following tasks:
     * Allow creation of X.509 client certificates to secure the communication with the cloud hub. The certificates must be signed with a ca certificate that allows the cloud hub to validate the client certificate
     * Allow renewal of the client certificate
  
-The security system of Vault allows it, to define in fine granularity, which client may invoke which operation. For example, it can be defined that a client may retrieve a newly generated client certificate, however, the X.500 common name and additional attributes of the certificate are predefined.
+The security system of Vault allows it to define in fine granularity, which client may invoke which operation. For example, it can be defined that a client may retrieve a newly generated client certificate, however, the X.500 common name and additional attributes, e.g. the TTL, of the certificate are fixed to predefined values.
 
 # Use Cases
 ## Cloud Hub
@@ -100,23 +109,46 @@ These are detailed use cases for the cloud hub
 
 ### Authenticate to Vault
 
-As a first step, the cloud hub pods have to authenticate to Vault in order to gain the privileges for all following use cases. As the cloud hub is running within kubernetes, the methods [provided by Vault](https://www.vaultproject.io/docs/platform/k8s) may be used. Basically, these are
+As a first step, the cloud hub pods have to authenticate to Vault in order to gain the privileges for all following use cases. This 
+requires to make a _Vault login token_ available to the application. This requires
+some manual effort, as the commonly used  methods used by Vault ([agent injector](https://www.vaultproject.io/docs/platform/k8s/injector#agent-sidecar-injector) resp. [container storage injection](https://www.vaultproject.io/docs/platform/k8s/csi#vault-csi-provider)) 
+cannot be used here (they are intended to inject _single_ secrets, i.e. credentials. They cannot be used to inject _both_ a new 
+certificate and a private key). So authentication of the cloud core may be implemented by using a _sidecar_ container that
 
-* Secret injection via the Vault agent injector
-* Secret injection via the container storage injection (CSI) facility of kubernetes
+* Uses a serviceaccount to authenticate to vault via the [kubernetes authentication method](https://www.vaultproject.io/docs/auth/kubernetes#kubernetes-auth-method)
+* When the identity of the cloudcore pods has been established, the sidecar container may retrieve new certificates
+from the Vault server (restricted by Vault policies) and place them into a shared volume, where the cloudcore pod
+may access them via simple file access. 
+* The cloudcore server may use the _GetCertificate_ functionpointer of [TLSConfig](https://pkg.go.dev/crypto/tls#Config) 
+to present a recent certificate to connecting clients.
 
-[Recommended](https://www.hashicorp.com/blog/kubernetes-vault-integration-via-sidecar-agent-injector-vs-csi-provider) is to use the Vault agent injector for now, as this is the more flexible of both solutions, and supports caching and secret rotation
+The detailed flow can be implemented as shown in the following diagram:
+
+![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/vault/docs/images/proposals/pki-cloudhub-auth.puml)
 
 
-### Generate a Server Certificate
+#### Implementation notes
+Note, that the certificates must already be present when the cloudhub containers starts, as it tries to retrieve the certificates 
+from the filesystem. A pragmatic approach to ensure this is to define the sidecar redundantly: 
 
-After authentication the server may create an X.509 certificate for itself that is used in the communication with the edge nodes. For this
+* First as an _init container_ that is run before the main containers start. The init container may then retrieve the initial certificates
+* As standard sidecar container that periodically refreshes the certificates
 
-* Vault must be configured to work as a [certification authority](https://learn.hashicorp.com/tutorials/vault/pki-engine?in=vault/secrets-management)
-* A suitable Vault role must be defined, that defines the parameters of the certificate to be generated (validity period, X.500 common name etc.)
+This will lead to some redundancy in the deployment descriptor, but ensures the presence of valid certificates during the lifetime
+of the cloudhub container.
 
-> Note:
-> The Vault documentation recommends to use a _separate_ root certification authority. However, it is technically feasible to operate the root ca within the same Vault instance.
+For the implementation of the cloudhub container the following changes have to be performed:
+
+* Currently the implementation requires the presence of the CA certificate as well as the _private key_. As the private key for the CA 
+certificate now remains within Vault, the validation on startup have to be relaxed for this
+* When using Vault, it is not necessary any more, to create and maintain a separate _kubernetes secrets_ containing certificates and
+secret keys anymore.
+* The servers (Websocket, QUIC) must use _dynamic_ secret resolution using the TLS configuration (supported by the Go API). This will 
+present the current certificate to connecting client, therefore allowing transparent certificate renewal.
+* Additionally, a certificate renewal by _dropping_ the current connections and forcing the clients to reconnect. Active TLS connections 
+do not allow for a intermittent certificate renewal. However, this would be disruptive for all current 
+
+
 
 ### Validate a Client Certificate
 
@@ -126,13 +158,14 @@ When a client connects to the cloud hub http server, the provided client certifi
 * Serial number of the offered client certificate has not been revoked
 * The passed certificate is signed by a valid certificate chain
 
- ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/vault/docs/images/proposals/pki-cloudhub-clientvalidation.puml)
+![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/vault/docs/images/proposals/pki-cloudhub-clientvalidation.puml)
 
-The validation of the client interface must be done programmatically on establishing the connection and is done by the client libraries. Vault does not provide functionality for _validating a certificate chain_.
+The validation of the client interface must be done programmatically on establishing the connection and is done by the client libraries. Vault does not provide functionality for _validating a certificate chain_. However, the TLS Server functionality provided by Go already implements client certificate validation.
 
 ## Automatic Renewal
 
-The server certificate should be periodically renewed. An automatic job may retrieve a new certificate and replace the one currently used. As the certificate is signed by a valid certification authority, the certificate change will be transparent for the connecting edge nodes.
+The server certificate should be periodically renewed. An automatic job may retrieve a new certificate and replace the one currently used. As the certificate is signed by a valid certification authority, the certificate change will be transparent for the connecting edge nodes. 
+As mentioned above, the side car container periodically retrieves a new certificate and provides it via a shared volume.
 
 
 ## Edge Hub
@@ -141,19 +174,14 @@ These are detailed use cases for the edge hub
 
 ### Authenticate to Vault
 
-The initial step for the edge hub nodes is to establish their identity with Vault. For this, every edge node must be configured with a _bootstrap certificate_. This certificate
-
-* is only used for authentication to Vault, not for communicating with the cloud hub. This might be enforced by signing these certificates with another CA certificate than the CA certificate used for communication.
-* Is long lived to avoid the requirement for frequent renewal. However, the bootstrap certificate _should_ be renewed periodically. These periods should be aligned with the physical maintenance intervals of the edge devices.
-* Must be protected tamper proof within the device.
-
+The initial step for the edge hub nodes is to establish their identity with Vault. For this, the edge node requires an _initial Vault token_ that allows it to authenticate itself to Vault. When authenticated, the edgenode can retrieve a x.509 certificate to secure the connection to the cloudhub.
 The authentication is straight forward:
  ![](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/edgefarm/kubeedge/vault/docs/images/proposals/pki-edgehub-auth.puml)
-
+ The token is checked by Vault for validity, when required the requesting client is rejected and will not be able to communicate the cloudedge server.
+ 
 ### Renew the token
 
-The token has a limited validity and must be renewed with the appropriate [Vault API](https://www.vaultproject.io/api-docs/auth/token#renew-a-token-self).
-
+For this approach, the Vault token should be long lived. However, it is also possible to use shorter lived tokens and _renew_ this token periodically. As the token is stored in the filesystem, the token renewal may be implemented by simply replacing this file (atomically).
 ### Generate a Client Certificate
 
 Using the bearer token the edge hub may request a new certificate. This requires, that 
@@ -163,10 +191,24 @@ Using the bearer token the edge hub may request a new certificate. This requires
 
 It is recommended to keep the validity period of the generated certificate as short as possible, e.g. a single day.
 
+#### Implementation Note
+Unfortunately, due to the architecture of the edgenode daemon, it is not possible to use the same approach as for the cloudhub server, i.e. to use a _sidecar_ container that implements the authentication and certificate handling. It it necessary, to implement the same functionality within the edge hub itself (however, a suitable library can be used to utilize the same implementation). Consequently, the _configuration_ of the edge hub has to be extended as well to configure Vault related parameters. 
+
+The following settings will have to be added:
+
+
+ Parameter | Default | Description
+ --- | --- | ---
+ Enable | false | Enable the Vault specific functionality
+Tokenfile | n/a | The file containing the Vault identity token
+CommonName | n/a | The common name for the certificates requested. Note that the Vault server may be configured to restrict the valid common names
+TTL | n/a | The validity period for the requested certificates. Note that the Vault server may be configured to impose additional restrictions on the maximum lifetime.
+
+
 ### Renew a Client Certificate
 
 As the client certificate is short lived, it requires periodic renewal. This is identical the generation of a new certificate.
 
 ## Device enrollment
 
-With the use cases described above the enrollment of a new device is automatic, as the device will request a new certificate without further user interaction. The mandatory precondition is, that the initial _bootstrap certificate_ has been provided via configuration.
+The enrollment of a new device is straight forward. Basically, as the actual functionality is part of the edge hub server itself, only a suitable configuration (see above) and a Vault token has to provisioned. The generation of the token is out of scope for this proposal. 

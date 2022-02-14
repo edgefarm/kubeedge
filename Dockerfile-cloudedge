@@ -1,0 +1,13 @@
+FROM golang AS builder
+
+RUN go install -v -gcflags="all=-N -l" github.com/go-delve/delve/cmd/dlv@v1.8.0
+
+FROM archlinux
+
+COPY --from=builder /go/bin/dlv /usr/local/bin/
+
+RUN pacman -Sy && pacman -S --noconfirm iptables
+
+COPY _output/local/bin/cloudcore /cloudcore
+
+ENTRYPOINT [ "/usr/local/bin/dlv", "dap","-l:2345", "--log", "--log-output=dap" ]
