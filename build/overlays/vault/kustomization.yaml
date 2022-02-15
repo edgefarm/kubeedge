@@ -5,6 +5,7 @@ bases:
 
 resources:
   - ca-configmap.yaml
+  - cloudhub-configmap.yaml
   
 patches:
   - patch.yaml
@@ -23,28 +24,3 @@ patchesJson6902:
       version: v1
       group: apps
       namespace: kubeedge
-
-      # volumes:
-      # - configMap:
-      #     items:
-      #     - key: ca.crt
-      #       path: ca.crt
-      #     name: cacert
-      #   name: cacert
-      # - configMap:
-      #     items:
-      #     - key: certretrieval.config
-      #       path: certretrieval.config
-      #     name: certretrieval.config-tthd4kfd8m
-      #   name: settings
-      # - configMap:
-      #     name: cloudcore
-      #   name: conf
-      # - hostPath:
-      #     path: /etc/kubeedge
-      #     type: DirectoryOrCreate
-      #   name: certs
-      # - hostPath:
-      #     path: /var/lib/kubeedge
-      #     type: DirectoryOrCreate
-      #   name: sock

@@ -17,6 +17,8 @@ func NewVaultRetriever(config v1alpha1.EdgeHub) (*VaultRetriever, error) {
 		OutCAfile:   config.TLSCAFile,
 		OutCertfile: config.TLSCertFile,
 		OutKeyfile:  config.TLSPrivateKeyFile,
+		// 20% buffer for
+		ValidityCheckTolerance: 80,
 	})
 	if err != nil {
 		return nil, err
