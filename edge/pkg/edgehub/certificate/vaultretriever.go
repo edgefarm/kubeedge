@@ -17,7 +17,7 @@ func NewVaultRetriever(config v1alpha1.EdgeHub) (*VaultRetriever, error) {
 		OutCAfile:   config.TLSCAFile,
 		OutCertfile: config.TLSCertFile,
 		OutKeyfile:  config.TLSPrivateKeyFile,
-		// 20% buffer for
+		// 20% buffer for validity checks
 		ValidityCheckTolerance: 80,
 	})
 	if err != nil {
@@ -26,6 +26,10 @@ func NewVaultRetriever(config v1alpha1.EdgeHub) (*VaultRetriever, error) {
 	return &VaultRetriever{*retriever}, nil
 }
 
+// VaultRetriever is an implementation of the certificate.CertificateRetriever interface
+// that integrates with Hashicorp Vault. The actual implementation just delegates
+// to the certRetrieval library, apart from configuration handling. The library
+// will handle the communication with Vault
 type VaultRetriever struct {
 	certRetrieval certretrieval.CertRetrieval
 }

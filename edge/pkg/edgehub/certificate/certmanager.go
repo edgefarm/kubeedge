@@ -59,7 +59,10 @@ type CertManager struct {
 }
 
 // CertificateRetriever defines an API to decouple the _retrieval_ of
-// certificates from the actual usage
+// certificates from the actual usage. This allows plugging in different mechanisms
+// how the certificates are retrieved and integrates with the certificate rotation
+// mechanism already in place. The original implementation (retrieving edge certificates
+// via token) has been moved (unchanged) into an realization of this interface.
 type CertificateRetriever interface {
 	RetrieveCertificate() (err error)
 }
