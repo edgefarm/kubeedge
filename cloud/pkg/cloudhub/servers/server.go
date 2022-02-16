@@ -29,7 +29,7 @@ func StartCloudHub(messageq *channelq.ChannelMessageQueue) {
 	}
 }
 
-func createTLSConfig(ca []byte, cert, key string) tls.Config {
+func createTLSConfig(ca []byte, certFallback, keyFallback []byte, certFile, keyFile string) tls.Config {
 	// init certificate
 	pool := x509.NewCertPool()
 	ok := pool.AppendCertsFromPEM(pem.EncodeToMemory(&pem.Block{Type: certutil.CertificateBlockType, Bytes: ca}))
@@ -37,16 +37,33 @@ func createTLSConfig(ca []byte, cert, key string) tls.Config {
 		panic(fmt.Errorf("fail to load ca content"))
 	}
 
+	// maintain backwards compatibility with the DER encoded cert read from
+	// the kubernetes secret
+	var fallback tls.Certificate
+	if certFallback != nil && keyFallback != nil {
+		certPem := pem.EncodeToMemory(&pem.Block{Type: certutil.CertificateBlockType, Bytes: certFallback})
+		keyPem := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyFallback})
+		var err error
+		fallback, err = tls.X509KeyPair(certPem, keyPem)
+		if err != nil {
+			klog.Exitf("Failed to create keypair: %v", err)
+		}
+	}
+
 	return tls.Config{
 		ClientCAs:  pool,
 		ClientAuth: tls.RequireAndVerifyClientCert,
 		GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			// dynamically read the certificate
-			certificate, err := tls.LoadX509KeyPair(cert, key)
-			if err != nil {
-				panic(err)
+			if certFile != "" && keyFile != "" {
+				// dynamically read the certificate if files are defined
+				certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
+				if err != nil {
+					klog.Exitf("Failed to load cert %q and key %q: %v", certFile, keyFile, err)
+				}
+				return &certificate, nil
+			} else {
+				return &fallback, nil
 			}
-			return &certificate, nil
 		},
 		MinVersion: tls.VersionTLS12,
 		// has to match cipher used by NewPrivateKey method, currently is ECDSA
@@ -55,7 +72,7 @@ func createTLSConfig(ca []byte, cert, key string) tls.Config {
 }
 
 func startWebsocketServer() {
-	tlsConfig := createTLSConfig(hubconfig.Config.Ca, hubconfig.Config.TLSCertFile, hubconfig.Config.TLSPrivateKeyFile)
+	tlsConfig := createTLSConfig(hubconfig.Config.Ca, hubconfig.Config.Cert, hubconfig.Config.Key, hubconfig.Config.TLSCertFile, hubconfig.Config.TLSPrivateKeyFile)
 	svc := server.Server{
 		Type:       api.ProtocolTypeWS,
 		TLSConfig:  &tlsConfig,
@@ -69,7 +86,7 @@ func startWebsocketServer() {
 }
 
 func startQuicServer() {
-	tlsConfig := createTLSConfig(hubconfig.Config.Ca, hubconfig.Config.TLSCertFile, hubconfig.Config.TLSPrivateKeyFile)
+	tlsConfig := createTLSConfig(hubconfig.Config.Ca, hubconfig.Config.Cert, hubconfig.Config.Key, hubconfig.Config.TLSCertFile, hubconfig.Config.TLSPrivateKeyFile)
 	svc := server.Server{
 		Type:       api.ProtocolTypeQuic,
 		TLSConfig:  &tlsConfig,
